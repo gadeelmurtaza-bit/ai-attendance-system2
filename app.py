@@ -1,90 +1,89 @@
 import streamlit as st
-import cv2
 from deepface import DeepFace
+import cv2
+import os
 import numpy as np
 from PIL import Image
 import pandas as pd
-import os
 
-st.set_page_config(page_title="AI Attendance System", layout="wide")
 st.title("AI Attendance System")
 
-# Create folders if they don't exist
+# Create folder to store student images
 if not os.path.exists("students"):
     os.makedirs("students")
 
-if "attendance" not in st.session_state:
-    st.session_state["attendance"] = {}
+# Sidebar
+menu = ["Home", "Add Single Student", "Bulk Add Students", "Take Attendance"]
+choice = st.sidebar.selectbox("Menu", menu)
 
-# -----------------------
-# Register Single Student
-# -----------------------
-st.header("Register Student")
-name = st.text_input("Student Name")
-roll = st.text_input("Roll Number")
-img_file = st.file_uploader("Upload Student Photo (jpg/png)", type=["jpg", "png"])
+# --- Home ---
+if choice == "Home":
+    st.subheader("Welcome to AI Attendance System")
+    st.text("Use the sidebar to add students or take attendance.")
 
-if st.button("Register Student"):
-    if name and roll and img_file:
-        img = Image.open(img_file)
-        img_path = f"students/{roll}_{name}.jpg"
-        img.save(img_path)
-        st.success(f"Student {name} registered successfully!")
-    else:
-        st.error("Please fill all fields and upload a photo.")
+# --- Add Single Student ---
+elif choice == "Add Single Student":
+    st.subheader("Add Single Student")
+    name = st.text_input("Student Name")
+    roll_no = st.text_input("Roll Number")
+    uploaded_file = st.file_uploader("Upload Student Photo (JPG/PNG)", type=["jpg", "jpeg", "png"])
+    
+    if st.button("Save Student"):
+        if name and roll_no and uploaded_file:
+            file_path = f"students/{roll_no}_{name}.jpg"
+            image = Image.open(uploaded_file)
+            image.save(file_path)
+            st.success(f"Student {name} saved successfully!")
+        else:
+            st.error("Please provide name, roll number, and photo.")
 
-# -----------------------
-# Take Attendance
-# -----------------------
-st.header("Take Attendance")
+# --- Bulk Add Students ---
+elif choice == "Bulk Add Students":
+    st.subheader("Bulk Add Students")
+    st.text("Upload multiple student photos in a folder and name them as RollName.jpg")
+    uploaded_files = st.file_uploader("Upload Multiple Photos", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+    
+    if st.button("Save Students"):
+        for file in uploaded_files:
+            file_path = f"students/{file.name}"
+            image = Image.open(file)
+            image.save(file_path)
+        st.success(f"{len(uploaded_files)} students saved successfully!")
 
-cam_option = st.selectbox("Use Camera?", ["Yes", "No"])
+# --- Take Attendance ---
+elif choice == "Take Attendance":
+    st.subheader("Take Attendance")
 
-if cam_option == "Yes":
     run = st.button("Start Camera")
     if run:
-        stframe = st.empty()
         cap = cv2.VideoCapture(0)
+        stframe = st.empty()
+
+        attendance = pd.DataFrame(columns=["Roll No", "Name"])
 
         while True:
             ret, frame = cap.read()
             if not ret:
-                st.warning("Failed to capture from camera.")
+                st.error("Camera not detected.")
                 break
-
-            # Convert to RGB
+            
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            stframe.image(rgb_frame, channels="RGB")
+            
+            # Compare with all student images
+            for student_img in os.listdir("students"):
+                student_path = os.path.join("students", student_img)
+                try:
+                    result = DeepFace.verify(rgb_frame, student_path, enforce_detection=False)
+                    if result["verified"]:
+                        roll_no, name_with_ext = student_img.split("_")
+                        name = os.path.splitext(name_with_ext)[0]
+                        if not ((attendance['Roll No'] == roll_no) & (attendance['Name'] == name)).any():
+                            attendance = pd.concat([attendance, pd.DataFrame([[roll_no, name]], columns=["Roll No", "Name"])], ignore_index=True)
+                        cv2.putText(frame, f"{name} Present", (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+                except:
+                    continue
 
-            # Press 'q' to stop
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            stframe.image(frame, channels="BGR")
 
         cap.release()
-        cv2.destroyAllWindows()
-
-else:
-    uploaded_img = st.file_uploader("Upload Image for Attendance", type=["jpg", "png"])
-    if uploaded_img:
-        uploaded_img_pil = Image.open(uploaded_img)
-        uploaded_img_cv = cv2.cvtColor(np.array(uploaded_img_pil), cv2.COLOR_RGB2BGR)
-
-        # Loop through registered students
-        for student_file in os.listdir("students"):
-            student_img_path = f"students/{student_file}"
-            result = DeepFace.verify(uploaded_img_cv, student_img_path, enforce_detection=False)
-            if result["verified"]:
-                st.success(f"Attendance marked for {student_file}")
-                st.session_state["attendance"][student_file] = "Present"
-            else:
-                st.info(f"{student_file} not recognized")
-
-# -----------------------
-# Show Attendance
-# -----------------------
-st.header("Attendance List")
-if st.session_state["attendance"]:
-    df = pd.DataFrame.from_dict(st.session_state["attendance"], orient="index", columns=["Status"])
-    st.table(df)
-else:
-    st.info("No attendance recorded yet.")
+        st.dataframe(attendance)
