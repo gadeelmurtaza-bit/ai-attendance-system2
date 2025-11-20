@@ -1,118 +1,90 @@
-# app.py
 import streamlit as st
-import face_recognition
-from PIL import Image
-import numpy as np
-import os
-import pandas as pd
 import cv2
-from datetime import datetime
+from deepface import DeepFace
+import numpy as np
+from PIL import Image
+import pandas as pd
+import os
 
-# ----------------- Setup -----------------
 st.set_page_config(page_title="AI Attendance System", layout="wide")
 st.title("AI Attendance System")
 
-# Create folders if not exist
+# Create folders if they don't exist
 if not os.path.exists("students"):
     os.makedirs("students")
-if not os.path.exists("attendance"):
-    os.makedirs("attendance")
 
-# ----------------- Helper Functions -----------------
-def save_student(name, roll, img):
-    path = f"students/{roll}_{name}.jpg"
-    img.save(path)
-    st.success(f"Saved student {name} with roll {roll}")
+if "attendance" not in st.session_state:
+    st.session_state["attendance"] = {}
 
-def load_known_faces():
-    known_encodings = []
-    known_names = []
-    for file in os.listdir("students"):
-        img_path = os.path.join("students", file)
-        img = face_recognition.load_image_file(img_path)
-        encodings = face_recognition.face_encodings(img)
-        if len(encodings) > 0:
-            known_encodings.append(encodings[0])
-            name = file.split("_",1)[1].replace(".jpg","")
-            known_names.append(name)
-    return known_encodings, known_names
+# -----------------------
+# Register Single Student
+# -----------------------
+st.header("Register Student")
+name = st.text_input("Student Name")
+roll = st.text_input("Roll Number")
+img_file = st.file_uploader("Upload Student Photo (jpg/png)", type=["jpg", "png"])
 
-def mark_attendance(name):
-    today = datetime.now().strftime("%Y-%m-%d")
-    filename = f"attendance/{today}.csv"
-    if os.path.exists(filename):
-        df = pd.read_csv(filename)
+if st.button("Register Student"):
+    if name and roll and img_file:
+        img = Image.open(img_file)
+        img_path = f"students/{roll}_{name}.jpg"
+        img.save(img_path)
+        st.success(f"Student {name} registered successfully!")
     else:
-        df = pd.DataFrame(columns=["Name", "Time"])
-    
-    if name not in df["Name"].values:
-        df = df.append({"Name": name, "Time": datetime.now().strftime("%H:%M:%S")}, ignore_index=True)
-        df.to_csv(filename, index=False)
+        st.error("Please fill all fields and upload a photo.")
 
-# ----------------- Sidebar -----------------
-mode = st.sidebar.selectbox("Mode", ["Single Registration", "Bulk Registration", "Take Attendance"])
+# -----------------------
+# Take Attendance
+# -----------------------
+st.header("Take Attendance")
 
-# ----------------- Single Registration -----------------
-if mode == "Single Registration":
-    st.subheader("Single Student Registration")
-    name = st.text_input("Name")
-    roll = st.text_input("Roll Number")
-    img_file = st.file_uploader("Upload Photo", type=["jpg", "jpeg", "png"])
-    
-    if st.button("Register Student"):
-        if name and roll and img_file:
-            img = Image.open(img_file)
-            save_student(name, roll, img)
-        else:
-            st.error("Please fill all fields!")
+cam_option = st.selectbox("Use Camera?", ["Yes", "No"])
 
-# ----------------- Bulk Registration -----------------
-elif mode == "Bulk Registration":
-    st.subheader("Bulk Student Registration")
-    csv_file = st.file_uploader("Upload CSV (name,roll)", type=["csv"])
-    img_zip = st.file_uploader("Upload ZIP of images", type=["zip"])
-    
-    st.info("Bulk registration is possible but must manually extract images in 'students/' folder matching roll_number_name.jpg")
-
-# ----------------- Take Attendance -----------------
-elif mode == "Take Attendance":
-    st.subheader("Take Attendance")
-    st.info("Webcam will open, look at the camera to mark attendance.")
-
-    known_encodings, known_names = load_known_faces()
-    if len(known_encodings) == 0:
-        st.warning("No students registered yet!")
-    else:
-        run = st.button("Start Camera")
-        FRAME_WINDOW = st.image([])
-
+if cam_option == "Yes":
+    run = st.button("Start Camera")
+    if run:
+        stframe = st.empty()
         cap = cv2.VideoCapture(0)
-        while run:
+
+        while True:
             ret, frame = cap.read()
             if not ret:
-                st.error("Could not access webcam")
+                st.warning("Failed to capture from camera.")
                 break
 
-            small_frame = cv2.resize(frame, (0,0), fx=0.25, fy=0.25)
-            rgb_small_frame = small_frame[:, :, ::-1]
+            # Convert to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            stframe.image(rgb_frame, channels="RGB")
 
-            face_locations = face_recognition.face_locations(rgb_small_frame)
-            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-
-            for face_encoding, face_location in zip(face_encodings, face_locations):
-                matches = face_recognition.compare_faces(known_encodings, face_encoding)
-                face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-                best_match_index = np.argmin(face_distances)
-
-                if matches[best_match_index]:
-                    name = known_names[best_match_index]
-                    mark_attendance(name)
-                    top, right, bottom, left = face_location
-                    top *= 4; right *= 4; bottom *= 4; left *= 4
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
-                    cv2.putText(frame, name, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
-
-            FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # Press 'q' to stop
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
         cap.release()
         cv2.destroyAllWindows()
+
+else:
+    uploaded_img = st.file_uploader("Upload Image for Attendance", type=["jpg", "png"])
+    if uploaded_img:
+        uploaded_img_pil = Image.open(uploaded_img)
+        uploaded_img_cv = cv2.cvtColor(np.array(uploaded_img_pil), cv2.COLOR_RGB2BGR)
+
+        # Loop through registered students
+        for student_file in os.listdir("students"):
+            student_img_path = f"students/{student_file}"
+            result = DeepFace.verify(uploaded_img_cv, student_img_path, enforce_detection=False)
+            if result["verified"]:
+                st.success(f"Attendance marked for {student_file}")
+                st.session_state["attendance"][student_file] = "Present"
+            else:
+                st.info(f"{student_file} not recognized")
+
+# -----------------------
+# Show Attendance
+# -----------------------
+st.header("Attendance List")
+if st.session_state["attendance"]:
+    df = pd.DataFrame.from_dict(st.session_state["attendance"], orient="index", columns=["Status"])
+    st.table(df)
+else:
+    st.info("No attendance recorded yet.")
