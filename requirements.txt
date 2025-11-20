@@ -1,9 +1,6 @@
-import streamlit as st
-import face_recognition
-from PIL import Image
-import numpy as np
-import os
-import pandas as pd
-
-# Load known faces
-# Compare camera capture with known faces
+streamlit
+numpy
+pandas
+Pillow
+opencv-python-headless==4.7.0.72
+face_recognition
