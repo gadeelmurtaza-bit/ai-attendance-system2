@@ -1,126 +1,118 @@
+# app.py
 import streamlit as st
+import face_recognition
+from PIL import Image
+import numpy as np
 import os
 import pandas as pd
-from deepface import DeepFace
-from PIL import Image
+import cv2
 from datetime import datetime
 
-# ------------ SETUP -------------
+# ----------------- Setup -----------------
+st.set_page_config(page_title="AI Attendance System", layout="wide")
+st.title("AI Attendance System")
+
+# Create folders if not exist
 if not os.path.exists("students"):
     os.makedirs("students")
+if not os.path.exists("attendance"):
+    os.makedirs("attendance")
 
-if not os.path.exists("database.csv"):
-    pd.DataFrame(columns=["name", "roll", "image_path"]).to_csv("database.csv", index=False)
+# ----------------- Helper Functions -----------------
+def save_student(name, roll, img):
+    path = f"students/{roll}_{name}.jpg"
+    img.save(path)
+    st.success(f"Saved student {name} with roll {roll}")
 
+def load_known_faces():
+    known_encodings = []
+    known_names = []
+    for file in os.listdir("students"):
+        img_path = os.path.join("students", file)
+        img = face_recognition.load_image_file(img_path)
+        encodings = face_recognition.face_encodings(img)
+        if len(encodings) > 0:
+            known_encodings.append(encodings[0])
+            name = file.split("_",1)[1].replace(".jpg","")
+            known_names.append(name)
+    return known_encodings, known_names
 
-def load_database():
-    return pd.read_csv("database.csv")
+def mark_attendance(name):
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename = f"attendance/{today}.csv"
+    if os.path.exists(filename):
+        df = pd.read_csv(filename)
+    else:
+        df = pd.DataFrame(columns=["Name", "Time"])
+    
+    if name not in df["Name"].values:
+        df = df.append({"Name": name, "Time": datetime.now().strftime("%H:%M:%S")}, ignore_index=True)
+        df.to_csv(filename, index=False)
 
+# ----------------- Sidebar -----------------
+mode = st.sidebar.selectbox("Mode", ["Single Registration", "Bulk Registration", "Take Attendance"])
 
-def save_student(name, roll, image):
-    path = f"students/{roll}.jpg"
-    image.save(path)
-    df = load_database()
-    df.loc[len(df)] = [name, roll, path]
-    df.to_csv("database.csv", index=False)
-
-
-def match_face(img):
-    df = load_database()
-    for _, row in df.iterrows():
-        try:
-            result = DeepFace.verify(
-                img1_path=img,
-                img2_path=row["image_path"],
-                detector_backend='retinaface'
-            )
-            if result["verified"]:
-                return row["name"], row["roll"]
-        except:
-            pass
-    return None, None
-
-
-def save_attendance(name, roll):
-    if not os.path.exists("attendance.csv"):
-        pd.DataFrame(columns=["name", "roll", "time"]).to_csv("attendance.csv", index=False)
-
-    df = pd.read_csv("attendance.csv")
-    time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df.loc[len(df)] = [name, roll, time_now]
-    df.to_csv("attendance.csv", index=False)
-
-
-# ------------ UI -------------
-st.title("AI Attendance System (DeepFace — No OpenCV)")
-
-menu = st.sidebar.selectbox(
-    "Menu",
-    ["Register Single Student", "Bulk Register Students", "Take Attendance", "View Database", "View Attendance"]
-)
-
-# ---------- Register Single ----------
-if menu == "Register Single Student":
-    st.header("Register Student")
-
+# ----------------- Single Registration -----------------
+if mode == "Single Registration":
+    st.subheader("Single Student Registration")
     name = st.text_input("Name")
     roll = st.text_input("Roll Number")
-    uploaded = st.file_uploader("Upload Photo (JPG)", type=["jpg", "jpeg"])
-
-    if st.button("Register"):
-        if name and roll and uploaded:
-            img = Image.open(uploaded)
+    img_file = st.file_uploader("Upload Photo", type=["jpg", "jpeg", "png"])
+    
+    if st.button("Register Student"):
+        if name and roll and img_file:
+            img = Image.open(img_file)
             save_student(name, roll, img)
-            st.success("Student registered successfully!")
         else:
-            st.error("Fill all fields.")
+            st.error("Please fill all fields!")
 
-# ---------- Bulk Register ----------
-elif menu == "Bulk Register Students":
-    st.header("Bulk Register (Format: roll_name.jpg)")
-    files = st.file_uploader("Upload multiple images", accept_multiple_files=True, type=["jpg"])
+# ----------------- Bulk Registration -----------------
+elif mode == "Bulk Registration":
+    st.subheader("Bulk Student Registration")
+    csv_file = st.file_uploader("Upload CSV (name,roll)", type=["csv"])
+    img_zip = st.file_uploader("Upload ZIP of images", type=["zip"])
+    
+    st.info("Bulk registration is possible but must manually extract images in 'students/' folder matching roll_number_name.jpg")
 
-    if st.button("Upload All"):
-        count = 0
-        for f in files:
-            try:
-                base = f.name.split(".")[0]
-                roll, name = base.split("_")
-                img = Image.open(f)
-                save_student(name, roll, img)
-                count += 1
-            except:
-                pass
-        st.success(f"{count} students registered successfully!")
+# ----------------- Take Attendance -----------------
+elif mode == "Take Attendance":
+    st.subheader("Take Attendance")
+    st.info("Webcam will open, look at the camera to mark attendance.")
 
-# ---------- Take Attendance ----------
-elif menu == "Take Attendance":
-    st.header("Take Attendance via Camera")
-
-    img_file = st.camera_input("Capture Image")
-
-    if img_file:
-        captured = Image.open(img_file)
-        temp_path = "temp_capture.jpg"
-        captured.save(temp_path)
-
-        name, roll = match_face(temp_path)
-
-        if name:
-            save_attendance(name, roll)
-            st.success(f"Attendance Marked: {name} ({roll})")
-        else:
-            st.error("Face not recognized!")
-
-# ---------- View DB ----------
-elif menu == "View Database":
-    st.header("Student Database")
-    st.dataframe(load_database())
-
-# ---------- View Attendance ----------
-elif menu == "View Attendance":
-    st.header("Attendance Log")
-    if os.path.exists("attendance.csv"):
-        st.dataframe(pd.read_csv("attendance.csv"))
+    known_encodings, known_names = load_known_faces()
+    if len(known_encodings) == 0:
+        st.warning("No students registered yet!")
     else:
-        st.info("No attendance recorded yet.")
+        run = st.button("Start Camera")
+        FRAME_WINDOW = st.image([])
+
+        cap = cv2.VideoCapture(0)
+        while run:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("Could not access webcam")
+                break
+
+            small_frame = cv2.resize(frame, (0,0), fx=0.25, fy=0.25)
+            rgb_small_frame = small_frame[:, :, ::-1]
+
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+
+            for face_encoding, face_location in zip(face_encodings, face_locations):
+                matches = face_recognition.compare_faces(known_encodings, face_encoding)
+                face_distances = face_recognition.face_distance(known_encodings, face_encoding)
+                best_match_index = np.argmin(face_distances)
+
+                if matches[best_match_index]:
+                    name = known_names[best_match_index]
+                    mark_attendance(name)
+                    top, right, bottom, left = face_location
+                    top *= 4; right *= 4; bottom *= 4; left *= 4
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
+                    cv2.putText(frame, name, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+            FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+        cap.release()
+        cv2.destroyAllWindows()
