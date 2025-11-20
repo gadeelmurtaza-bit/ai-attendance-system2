@@ -1,6 +1,6 @@
 streamlit
-opencv-python
-face_recognition
+opencv-python-headless
 numpy
 pillow
-sqlite3-binary
+face-recognition
+cmake
