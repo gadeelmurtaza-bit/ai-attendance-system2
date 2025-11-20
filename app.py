@@ -2,7 +2,6 @@ import streamlit as st
 from deepface import DeepFace
 import cv2
 import os
-import numpy as np
 from PIL import Image
 import pandas as pd
 
@@ -12,22 +11,22 @@ st.title("AI Attendance System")
 if not os.path.exists("students"):
     os.makedirs("students")
 
-# Sidebar
+# Sidebar menu
 menu = ["Home", "Add Single Student", "Bulk Add Students", "Take Attendance"]
 choice = st.sidebar.selectbox("Menu", menu)
 
 # --- Home ---
 if choice == "Home":
     st.subheader("Welcome to AI Attendance System")
-    st.text("Use the sidebar to add students or take attendance.")
+    st.write("Use the sidebar to add students or take attendance.")
 
 # --- Add Single Student ---
 elif choice == "Add Single Student":
     st.subheader("Add Single Student")
     name = st.text_input("Student Name")
     roll_no = st.text_input("Roll Number")
-    uploaded_file = st.file_uploader("Upload Student Photo (JPG/PNG)", type=["jpg", "jpeg", "png"])
-    
+    uploaded_file = st.file_uploader("Upload Student Photo", type=["jpg", "jpeg", "png"])
+
     if st.button("Save Student"):
         if name and roll_no and uploaded_file:
             file_path = f"students/{roll_no}_{name}.jpg"
@@ -35,14 +34,14 @@ elif choice == "Add Single Student":
             image.save(file_path)
             st.success(f"Student {name} saved successfully!")
         else:
-            st.error("Please provide name, roll number, and photo.")
+            st.error("Please provide all information and upload a photo.")
 
 # --- Bulk Add Students ---
 elif choice == "Bulk Add Students":
     st.subheader("Bulk Add Students")
-    st.text("Upload multiple student photos in a folder and name them as RollName.jpg")
-    uploaded_files = st.file_uploader("Upload Multiple Photos", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
-    
+    st.write("Upload multiple photos. Name files as `RollName.jpg`")
+    uploaded_files = st.file_uploader("Upload Photos", type=["jpg","jpeg","png"], accept_multiple_files=True)
+
     if st.button("Save Students"):
         for file in uploaded_files:
             file_path = f"students/{file.name}"
@@ -53,12 +52,11 @@ elif choice == "Bulk Add Students":
 # --- Take Attendance ---
 elif choice == "Take Attendance":
     st.subheader("Take Attendance")
-
     run = st.button("Start Camera")
+
     if run:
         cap = cv2.VideoCapture(0)
         stframe = st.empty()
-
         attendance = pd.DataFrame(columns=["Roll No", "Name"])
 
         while True:
@@ -66,10 +64,10 @@ elif choice == "Take Attendance":
             if not ret:
                 st.error("Camera not detected.")
                 break
-            
+
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Compare with all student images
+
+            # Compare with student images
             for student_img in os.listdir("students"):
                 student_path = os.path.join("students", student_img)
                 try:
